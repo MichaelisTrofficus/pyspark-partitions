@@ -1,0 +1,4 @@
+-r requirements.txt
+chispa==0.9.2
+coverage==6.5.0
+pytest==7.2.0
