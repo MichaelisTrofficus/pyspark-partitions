@@ -1,9 +1,11 @@
-from typing import Union
+import logging
+import math
+from typing import Union, List
 
 from pyspark.sql import DataFrame
 from pyspark.sql._typing import ColumnOrName
 
-from pyspark_partitions.helpers import count_number_of_partitions
+from helpers import df_size_in_bytes_exact, df_size_in_bytes_approximate
 
 
 def repartition(
@@ -29,17 +31,47 @@ def repartition(
     return df
 
 
-def remove_empty_partitions(df: DataFrame):
-    """
-    This method will remove empty partitions from a DataFrame. It is useful after a filter, for
-    example, when a great number of partitions may contain zero registers.
-
-    Note: This functionality may be useless if you are using Adaptive Query Execution from Spark 3.0
-
-    :param df: A pyspark DataFrame
-    :return: A DataFrame with all empty partitions removed
-    """
-    non_empty_partitions = sum(
-        df.rdd.mapPartitions(count_number_of_partitions).collect()
+def optimal_partitions_with_size_estimation_no_cols(
+    df_size_in_bytes, target_size_in_bytes
+):
+    n_partitions = math.ceil(df_size_in_bytes / target_size_in_bytes)
+    logging.info(
+        f"DataFrame Size: {df_size_in_bytes} | Number of partitions: {n_partitions}"
     )
-    return df.coalesce(non_empty_partitions)
+    return n_partitions
+
+
+def repartition_with_size_estimation(
+    df: DataFrame,
+    df_sample_perc: float = 0.05,
+    target_size_in_bytes: int = 134_217_728,
+    partition_cols: Union[str, List[str]] = None,
+):
+    """
+    This method repartitions a PySpark DataFrame using size estimation.
+    :param df: A PySpark DataFrame
+    :param df_sample_perc: A float representing the percentage of the input DataFrame that will be used
+        to estimate the total size.
+    :param target_size_in_bytes: The target size of the future partitions. Defaults to 128 MB
+    :param partition_cols: List of partition cols
+    :return: A partitioned DataFrame
+    """
+    if df_sample_perc <= 0 or df_sample_perc > 1:
+        raise ValueError("df_sample_perc must be in the interval (0, 1]")
+
+    if df_sample_perc == 1:
+        logging.info("Using complete DataFrame")
+        df_size_in_bytes = df_size_in_bytes_exact(df)
+    else:
+        logging.info(f"Using sampling percentage {df_sample_perc}")
+        df_size_in_bytes = df_size_in_bytes_approximate(df, sample_perc=df_sample_perc)
+
+    if not partition_cols:
+        n_partitions = optimal_partitions_with_size_estimation_no_cols(
+            df_size_in_bytes, target_size_in_bytes
+        )
+    else:
+        # TODO: To be implememted
+        n_partitions = df.rdd.getNumPartitions()
+
+    return df.repartition(n_partitions, partition_cols)

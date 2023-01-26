@@ -18,6 +18,22 @@ def count_number_of_partitions(iterator):
     yield n
 
 
+def remove_empty_partitions(df: DataFrame):
+    """
+    This method will remove empty partitions from a DataFrame. It is useful after a filter, for
+    example, when a great number of partitions may contain zero registers.
+
+    Note: This functionality may be useless if you are using Adaptive Query Execution from Spark 3.0
+
+    :param df: A pyspark DataFrame
+    :return: A DataFrame with all empty partitions removed
+    """
+    non_empty_partitions = sum(
+        df.rdd.mapPartitions(count_number_of_partitions).collect()
+    )
+    return df.coalesce(non_empty_partitions)
+
+
 def df_size_in_bytes_exact(df: DataFrame):
     """
     Calculates the exact size in memory of a DataFrame by caching it and accessing the optimized plan
