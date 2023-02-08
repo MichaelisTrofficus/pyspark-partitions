@@ -5,10 +5,14 @@ from typing import Union, List
 from pyspark.sql import DataFrame
 from pyspark.sql._typing import ColumnOrName
 
-from helpers import df_size_in_bytes_exact, df_size_in_bytes_approximate
+from helpers import (
+    df_size_in_bytes_exact,
+    df_size_in_bytes_approximate,
+    get_quantile_partition_count,
+)
 
 
-def repartition(
+def safe_repartition(
     df: DataFrame,
     numPartitions: Union[int, "ColumnOrName"],
 ):
@@ -31,29 +35,22 @@ def repartition(
     return df
 
 
-def optimal_partitions_with_size_estimation_no_cols(
-    df_size_in_bytes, target_size_in_bytes
-):
-    n_partitions = math.ceil(df_size_in_bytes / target_size_in_bytes)
-    logging.info(
-        f"DataFrame Size: {df_size_in_bytes} | Number of partitions: {n_partitions}"
-    )
-    return n_partitions
-
-
 def repartition_with_size_estimation(
     df: DataFrame,
+    partition_cols: Union[str, List[str]] = None,
     df_sample_perc: float = 0.05,
     target_size_in_bytes: int = 134_217_728,
-    partition_cols: Union[str, List[str]] = None,
+    quantile_count_estimation: float = 0.5,
 ):
+    # TODO: Improve this docstring ...
     """
     This method repartitions a PySpark DataFrame using size estimation.
     :param df: A PySpark DataFrame
+    :param partition_cols: List of partition cols
     :param df_sample_perc: A float representing the percentage of the input DataFrame that will be used
         to estimate the total size.
     :param target_size_in_bytes: The target size of the future partitions. Defaults to 128 MB
-    :param partition_cols: List of partition cols
+    :param quantile_count_estimation: The quantile ...
     :return: A partitioned DataFrame
     """
     if df_sample_perc <= 0 or df_sample_perc > 1:
@@ -63,15 +60,21 @@ def repartition_with_size_estimation(
         logging.info("Using complete DataFrame")
         df_size_in_bytes = df_size_in_bytes_exact(df)
     else:
-        logging.info(f"Using sampling percentage {df_sample_perc}")
+        logging.info(
+            f"Using sampling percentage {df_sample_perc}."
+            f" Notice the DataFrame size is just an approximation"
+        )
         df_size_in_bytes = df_size_in_bytes_approximate(df, sample_perc=df_sample_perc)
 
     if not partition_cols:
-        n_partitions = optimal_partitions_with_size_estimation_no_cols(
-            df_size_in_bytes, target_size_in_bytes
-        )
+        n_partitions = math.ceil(df_size_in_bytes / target_size_in_bytes)
     else:
-        # TODO: To be implememted
-        n_partitions = df.rdd.getNumPartitions()
+        n_rows = get_quantile_partition_count(df, quantile=quantile_count_estimation)
+        percentile_partition_size = (df_size_in_bytes / df.count()) * n_rows
+        n_partitions = df_size_in_bytes / percentile_partition_size
+
+    logging.info(
+        f"DataFrame Size: {df_size_in_bytes} | Number of partitions: {n_partitions}"
+    )
 
     return df.repartition(n_partitions, partition_cols)
