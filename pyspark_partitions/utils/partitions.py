@@ -44,6 +44,16 @@ def add_partition_id_column(df: DataFrame, partition_id_colname: str = "partitio
     return df.withColumn(partition_id_colname, sf.spark_partition_id())
 
 
+def get_partition_count(df: DataFrame) -> DataFrame:
+    """
+    Gets the number of registers per partition. This method is useful if we are trying to determine if some
+    partition is skewed.
+
+    :return: A DataFrame containing `partition_id` and `count` columns
+    """
+    return add_partition_id_column(df).groupBy("partition_id").count()
+
+
 def get_quantile_partition_count(
     df: DataFrame, quantile: float = 0.5, partition_cols: Union[str, List[str]] = None
 ):
@@ -62,13 +72,3 @@ def get_quantile_partition_count(
         .count()
         .approxQuantile("count", [quantile], 0.001)[0]
     )
-
-
-def get_partition_count(df: DataFrame) -> DataFrame:
-    """
-    Gets the number of registers per partition. This method is useful if we are trying to determine if some
-    partition is skewed.
-
-    :return: A DataFrame containing `partition_id` and `count` columns
-    """
-    return add_partition_id_column(df).groupBy("partition_id").count()
